@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>$PFP-MAN Game</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        /* Retro Game Aesthetics */
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            /* CUSTOM BACKGROUND IMAGE */
+            background-image: url('https://pbs.twimg.com/media/G2pl8OeW0AAEgIS?format=jpg&name=large');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            background-color: #000;
+            font-family: 'Press Start 2P', cursive;
+            color: #fff;
+            flex-direction: column;
+            padding: 20px;
+        }
+
+        #game-container {
+            border: 10px solid #333;
+            border-radius: 15px;
+            box-shadow: 0 0 40px rgba(255, 255, 0, 0.5), 0 0 15px #fff;
+            background-color: #000000e0; /* Semi-transparent black over the background image */
+        }
+
+        canvas {
+            display: block;
+            background-color: #000000;
+        }
+
+        #game-info {
+            width: 100%;
+            max-width: 840px; /* Adjusted max width for larger map */
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            font-size: 18px;
+            color: #ffcc00; /* Yellow */
+            text-shadow: 3px 3px 0 #000;
+        }
+
+        #info-score, #info-lives {
+            background-color: #111;
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: 3px solid #ffcc00;
+            box-shadow: inset 0 0 8px rgba(255, 255, 0, 0.7);
+        }
+
+        h1 {
+            color: #ff0;
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 32px;
+            text-shadow: 5px 5px 0 #ff6600;
+        }
+        
+        /* Centering the h1 content and aligning the logo */
+        h1.title-bar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        #title-logo {
+            filter: drop-shadow(0 0 5px rgba(255, 255, 0, 0.8));
+        }
+
+        /* Message Box Styling */
+        #message-box {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.95);
+            border: 6px solid #ff0;
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            z-index: 1000;
+            box-shadow: 0 0 60px rgba(255, 255, 0, 0.9);
+            display: none; /* Hidden by default */
+        }
+        #message-box p {
+            font-size: 22px;
+            margin-bottom: 25px;
+        }
+        .pacman-icon {
+            color: #ff0;
+            font-size: 40px;
+            margin-bottom: 15px;
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- Logo and Title Display -->
+    <h1 class="title-bar">
+        <!-- PFP.png Logo Placeholder -->
+        <img id="title-logo" src="pfp.png" alt="PFP Logo" class="w-8 h-8 mr-3">
+        $PFP-MAN
+    </h1>
+
+    <div id="game-info">
+        <div id="info-score">SCORE: 0</div>
+        <div id="info-lives">LIVES: 3</div>
+    </div>
+
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <div id="message-box">
+        <div class="pacman-icon">🟡</div>
+        <p id="message-text">Press ENTER to Start</p>
+        <p style="font-size: 12px; color: #aaa;">Use Arrow Keys for Movement</p>
+    </div>
+
+    <script>
+        // --- CONSTANTS AND CONFIGURATION ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const TILE_SIZE = 35; 
+        const MAP_ROWS = 24;
+        const MAP_COLS = 24;
+        
+        // --- SPEED BALANCE ADJUSTMENT ---
+        const PAC_SPEED = 4.0; 
+        const GHOST_BASE_SPEED = 3.2; // Reduced for easier evasion
+        const GHOST_FRIGHT_SPEED = 2.0; 
+        const GHOST_DEAD_SPEED = 8.0; 
+
+        const DOT_RADIUS = 4; 
+        const POWER_PELLET_RADIUS = 8; 
+        const POWER_PELLET_DURATION = 8000; // 8 seconds
+        const GHOST_FRIGHT_COLOR = 'blue';
+        
+        // PFP-MAN image setup
+        // NOTE: CHANGE THIS URL TO THE ACTUAL PATH OF YOUR PFP.PNG FILE!
+        const PFP_IMAGE_URL = 'pfp.png'; 
+        const pfpImage = new Image();
+        pfpImage.src = PFP_IMAGE_URL; // The character will use this image
+
+        // Set canvas dimensions based on the map
+        canvas.width = MAP_COLS * TILE_SIZE;
+        canvas.height = MAP_ROWS * TILE_SIZE;
+
+        // --- GAME STATE VARIABLES ---
+        let score = 0;
+        let lives = 3;
+        let level = 1;
+        let gameLoopId;
+        let isPaused = true;
+        let lastUpdateTime = 0; // Used for delta time calculation
+        let powerPelletTimer = 0;
+
+        // 0: Dot, 1: Wall, 2: Empty, 3: Ghost Gate, 4: Power Pellet
+        // Center wall removed and more Power Pellets added as requested
+        let initialMap = [
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,4,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,4,1],
+            [1,0,1,1,1,0,1,1,1,1,0,1,1,0,1,1,1,1,0,1,1,1,0,1],
+            [1,0,1,1,1,0,1,1,1,1,0,1,1,0,1,1,1,1,0,1,1,1,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,1,1,0,1,1,0,1,1,1,1,1,1,1,1,0,1,1,0,1,1,0,1],
+            [1,0,0,0,0,1,1,0,0,0,0,1,1,0,0,0,0,1,1,0,0,0,0,1],
+            [1,1,1,1,0,1,1,1,1,1,2,2,2,2,1,1,1,1,1,0,1,1,1,1], // Center path clear
+            [1,1,1,1,0,1,1,0,0,0,3,3,3,3,0,0,0,1,1,0,1,1,1,1], // Ghost house
+            [1,1,1,1,0,0,0,0,1,1,2,2,2,2,1,1,0,0,0,0,1,1,1,1],
+            [1,0,0,0,0,1,1,0,1,1,2,2,2,2,1,1,0,1,1,0,0,0,0,1],
+            [1,0,1,1,1,1,1,0,1,1,1,1,1,1,1,1,0,1,1,1,1,1,0,1],
+            [1,0,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,0,1],
+            [1,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,1],
+            [1,1,1,1,0,1,1,0,0,0,0,1,1,0,0,0,0,1,1,0,1,1,1,1],
+            [1,0,0,0,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,0,0,0,1],
+            [1,4,1,1,0,0,0,0,1,1,0,0,0,0,1,1,0,0,0,0,1,1,4,1],
+            [1,0,1,1,1,1,1,0,1,1,1,1,1,1,1,1,0,1,1,1,1,1,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,1,1,1,0,1,1,1,1,0,1,1,0,1,1,1,1,0,1,1,1,0,1],
+            [1,0,1,1,1,0,1,1,1,1,0,1,1,0,1,1,1,1,0,1,1,1,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,4,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,4,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+        ];
+        
+        // Deep copy of the map for resets
+        let map = initialMap.map(row => [...row]);
+
+        // --- PAC-MAN OBJECT ---
+        const pacman = {
+            x: 1 * TILE_SIZE + TILE_SIZE / 2, // Start in 1, 1
+            y: 1 * TILE_SIZE + TILE_SIZE / 2,
+            radius: TILE_SIZE / 2.5,
+            dirX: PAC_SPEED,
+            dirY: 0,
+            nextDirX: PAC_SPEED,
+            nextDirY: 0,
+            color: 'yellow',
+        };
+
+        // --- GHOST CLASS ---
+        class Ghost {
+            constructor(startX, startY, color, name) {
+                this.startX = startX;
+                this.startY = startY;
+                this.x = startX;
+                this.y = startY;
+                this.color = color;
+                this.name = name;
+                this.dirX = 0;
+                this.dirY = -GHOST_BASE_SPEED; // Start moving up
+                this.isFrightened = false;
+                this.isDead = false;
+                this.speed = GHOST_BASE_SPEED;
+                this.radius = TILE_SIZE / 2.5; // Scaled radius
+            }
+
+            getCurrentSpeed() {
+                if (this.isDead) return GHOST_DEAD_SPEED;
+                if (this.isFrightened) return GHOST_FRIGHT_SPEED;
+                return GHOST_BASE_SPEED;
+            }
+
+            // WALL CHECK FIX: The gate (type 3) is only a wall for Pac-Man,
+            // allowing ghosts to exit the house freely.
+            checkWall(x, y) {
+                const tileY = Math.floor(y);
+                const tileX = Math.floor(x);
+
+                // 1. Out of bounds: always treated as a wall (prevents leaving the black path)
+                if (tileY < 0 || tileY >= MAP_ROWS || tileX < 0 || tileX >= MAP_COLS) {
+                    return true; 
+                }
+
+                const tileType = map[tileY][tileX];
+
+                // 2. Ghosts are only blocked by regular Wall tiles (1).
+                // They can pass through the Ghost Gate (3) whether they are alive or dead.
+                return tileType === 1;
+            }
+
+            // Determines if the ghost should change direction (at a junction or wall)
+            shouldChangeDirection() {
+                const speed = this.getCurrentSpeed();
+                const currentTileX = Math.floor(this.x / TILE_SIZE);
+                const currentTileY = Math.floor(this.y / TILE_SIZE);
+
+                const centerTolerance = speed * 0.5; 
+
+                // Ghost must be near the tile center to make a decision
+                const isCenteredX = Math.abs((this.x % TILE_SIZE) - TILE_SIZE / 2) < centerTolerance;
+                const isCenteredY = Math.abs((this.y % TILE_SIZE) - TILE_SIZE / 2) < centerTolerance;
+
+                // Check if a wall is ahead
+                const nextTileX = currentTileX + (this.dirX / speed || 0);
+                const nextTileY = currentTileY + (this.dirY / speed || 0);
+                const isWallAhead = this.checkWall(nextTileX, nextTileY);
+
+                if (isWallAhead) {
+                    // If hitting a wall, must change direction immediately
+                    this.snapToCenter(currentTileX, currentTileY);
+                    return true;
+                }
+                
+                // If perfectly centered, it MUST decide if there are multiple options
+                if (isCenteredX && isCenteredY) {
+                    const possibleDirections = this.getPossibleDirections(currentTileX, currentTileY);
+                    
+                    // If there's more than one forward option (not a corridor), decide
+                    if (possibleDirections.length >= 1) { 
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+            
+            snapToCenter(tileX, tileY) {
+                 // Snap position to the center of the current tile
+                 this.x = tileX * TILE_SIZE + TILE_SIZE / 2;
+                 this.y = tileY * TILE_SIZE + TILE_SIZE / 2;
+            }
+
+            getPossibleDirections(tileX, tileY) {
+                const speed = this.getCurrentSpeed();
+                const possibleMoves = [];
+                const directions = [
+                    { dx: speed, dy: 0 },
+                    { dx: -speed, dy: 0 },
+                    { dx: 0, dy: speed },
+                    { dx: 0, dy: -speed }
+                ];
+
+                for (const dir of directions) {
+                    const nextTileX = tileX + (dir.dx / speed);
+                    const nextTileY = tileY + (dir.dy / speed);
+                    
+                    const isBlocked = this.checkWall(nextTileX, nextTileY);
+                    // Prevents instant reversal, unless it's the only option (dead end)
+                    const isReverse = (dir.dx === -this.dirX && dir.dy === -this.dirY);
+
+                    if (!isBlocked && !isReverse) {
+                        possibleMoves.push(dir);
+                    }
+                }
+                
+                // If only reversal is possible (dead end), must turn back.
+                if (possibleMoves.length === 0) {
+                     const reverseDir = { dx: -this.dirX, dy: -this.dirY };
+                     const reverseTileX = tileX + (reverseDir.dx / speed);
+                     const reverseTileY = tileY + (reverseDir.dy / speed);
+
+                     if (!this.checkWall(reverseTileX, reverseTileY)) {
+                        possibleMoves.push(reverseDir);
+                     }
+                }
+                return possibleMoves;
+            }
+
+            // Selects the best move toward the target (aggressive chase)
+            chooseBestMove(moves, currentTileX, currentTileY, targetX, targetY) {
+                let bestMove = moves[0];
+                // Frightened state needs to maximize distance (flee)
+                let bestDistance = this.isFrightened ? -Infinity : Infinity; 
+                const speed = this.getCurrentSpeed();
+
+                for (const move of moves) {
+                    // Potential next tile coordinates
+                    const newX = currentTileX + (move.dx / speed);
+                    const newY = currentTileY + (move.dy / speed);
+
+                    // Euclidean distance to target tile
+                    const distance = Math.hypot(newX - targetX, newY - targetY);
+
+                    if (this.isFrightened) {
+                        // Frightened: Move AWAY from target (maximize distance)
+                        if (distance > bestDistance) {
+                            bestDistance = distance;
+                            bestMove = move;
+                        }
+                    } else {
+                        // Chase/Dead: Move TOWARDS target (minimize distance)
+                        if (distance < bestDistance) {
+                            bestDistance = distance;
+                            bestMove = move;
+                        }
+                    }
+                }
+                return bestMove;
+            }
+
+            // Main update loop
+            update() {
+                this.speed = this.getCurrentSpeed();
+
+                const currentTileX = Math.floor(this.x / TILE_SIZE);
+                const currentTileY = Math.floor(this.y / TILE_SIZE);
+
+                let targetTileX, targetTileY;
+
+                if (this.isDead) {
+                    // Target: Ghost start position (returning home)
+                    targetTileX = Math.floor(this.startX / TILE_SIZE);
+                    targetTileY = Math.floor(this.startY / TILE_SIZE);
+
+                    // If ghost is back home
+                    if (currentTileX === targetTileX && currentTileY === targetTileY) {
+                        // Respawn
+                        this.isDead = false;
+                        this.isFrightened = false;
+                        this.dirX = 0;
+                        this.dirY = -GHOST_BASE_SPEED; // Initial movement out of the house
+                        this.snapToCenter(currentTileX, currentTileY);
+                        return;
+                    }
+
+                } else {
+                    // Target: Pacman's position (CHASE or FRIGHTENED)
+                    targetTileX = Math.floor(pacman.x / TILE_SIZE);
+                    targetTileY = Math.floor(pacman.y / TILE_SIZE);
+                }
+                
+                // If it's time to change direction
+                if (this.shouldChangeDirection()) {
+                    const possibleMoves = this.getPossibleDirections(currentTileX, currentTileY);
+                    
+                    if (possibleMoves.length > 0) {
+                        const bestMove = this.chooseBestMove(possibleMoves, currentTileX, currentTileY, targetTileX, targetTileY);
+                        this.dirX = bestMove.dx;
+                        this.dirY = bestMove.dy;
+                    } else {
+                        // Stop if genuinely stuck
+                        this.dirX = 0;
+                        this.dirY = 0;
+                    }
+                }
+                
+                // Move based on current speed/direction
+                this.x += this.dirX;
+                this.y += this.dirY;
+            }
+
+            draw() {
+                // Ghost body 
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+
+                if (this.isDead) {
+                    ctx.fillStyle = 'white';
+                } else if (this.isFrightened) {
+                    // Flashing effect near the end of fright
+                    const flashDuration = 2000;
+                    if (powerPelletTimer < flashDuration && (Math.floor(Date.now() / 200) % 2) === 0) {
+                        ctx.fillStyle = 'white'; // Flash white
+                    } else {
+                        ctx.fillStyle = GHOST_FRIGHT_COLOR; // Standard blue
+                    }
+                } else {
+                    ctx.fillStyle = this.color;
+                }
+                ctx.fill();
+                ctx.closePath();
+
+                // Draw eyes (always white with black pupils)
+                const eyeSize = TILE_SIZE / 7;
+                const pupilSize = TILE_SIZE / 14;
+                const eyeOffset = TILE_SIZE / 5;
+
+                // Determine eye direction based on current movement
+                let eyeDirX = this.dirX / this.speed || 0;
+                let eyeDirY = this.dirY / this.speed || 0;
+
+                // Adjust for dead state (eyes point up)
+                if (this.isDead) {
+                    eyeDirX = 0;
+                    eyeDirY = -1;
+                }
+
+                // Left Eye
+                ctx.fillStyle = 'white';
+                ctx.beginPath();
+                ctx.arc(this.x - eyeOffset, this.y - eyeOffset, eyeSize, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Right Eye
+                ctx.beginPath();
+                ctx.arc(this.x + eyeOffset, this.y - eyeOffset, eyeSize, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Pupils
+                ctx.fillStyle = 'black';
+                ctx.beginPath();
+                ctx.arc(this.x - eyeOffset + eyeDirX * (eyeSize - pupilSize), this.y - eyeOffset + eyeDirY * (eyeSize - pupilSize), pupilSize, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.beginPath();
+                ctx.arc(this.x + eyeOffset + eyeDirX * (eyeSize - pupilSize), this.y + eyeDirY * (eyeSize - pupilSize) - eyeOffset, pupilSize, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        
+        // Five ghosts, placed in the ghost house (row 9)
+        const ghosts = [
+            new Ghost(9 * TILE_SIZE + TILE_SIZE / 2, 9 * TILE_SIZE + TILE_SIZE / 2, 'lime', 'Ghost5'), 
+            new Ghost(10 * TILE_SIZE + TILE_SIZE / 2, 9 * TILE_SIZE + TILE_SIZE / 2, 'red', 'Blinky'),
+            new Ghost(11 * TILE_SIZE + TILE_SIZE / 2, 9 * TILE_SIZE + TILE_SIZE / 2, 'pink', 'Pinky'),
+            new Ghost(12 * TILE_SIZE + TILE_SIZE / 2, 9 * TILE_SIZE + TILE_SIZE / 2, 'cyan', 'Inky'),
+            new Ghost(13 * TILE_SIZE + TILE_SIZE / 2, 9 * TILE_SIZE + TILE_SIZE / 2, 'orange', 'Clyde'),
+        ];
+
+        // --- DRAWING FUNCTIONS ---
+
+        function drawMap() {
+            for (let y = 0; y < MAP_ROWS; y++) {
+                for (let x = 0; x < MAP_COLS; x++) {
+                    const type = map[y][x];
+                    const centerX = x * TILE_SIZE + TILE_SIZE / 2;
+                    const centerY = y * TILE_SIZE + TILE_SIZE / 2;
+
+                    if (type === 1) { // Wall
+                        ctx.fillStyle = '#0000FF'; // Blue walls
+                        ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                        
+                        // Draw a border effect
+                        ctx.strokeStyle = '#3333FF';
+                        ctx.lineWidth = 4;
+                        ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+
+                    } else if (type === 3) { // Ghost Gate
+                        // Ghost gate visualization
+                        ctx.fillStyle = '#ff66b2'; // Pink gate line
+                        ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE/4);
+                    }
+                     else if (type === 0) { // Dot
+                        ctx.fillStyle = 'white';
+                        ctx.beginPath();
+                        // Add a subtle pulsing effect to dots
+                        const scale = 1 + Math.sin(Date.now() / 400) * 0.05; 
+                        ctx.arc(centerX, centerY, DOT_RADIUS * scale, 0, Math.PI * 2);
+                        ctx.fill();
+                    } else if (type === 4) { // Power Pellet
+                        ctx.fillStyle = 'white';
+                        ctx.beginPath();
+                        // Add a subtle pulsing effect
+                        const scale = 1 + Math.sin(Date.now() / 200) * 0.2;
+                        ctx.arc(centerX, centerY, POWER_PELLET_RADIUS * scale, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+
+        function drawPacman() {
+            // Use ctx.save() and ctx.restore() to handle rotation
+            ctx.save();
+            
+            // Translate the canvas to the center of Pacman's position
+            ctx.translate(pacman.x, pacman.y);
+
+            let rotationAngle = 0;
+            // Determine rotation based on current direction (dirX, dirY)
+            if (pacman.dirX > 0) rotationAngle = 0; // Right (Default)
+            else if (pacman.dirX < 0) rotationAngle = Math.PI; // Left
+            else if (pacman.dirY < 0) rotationAngle = -Math.PI / 2; // Up
+            else if (pacman.dirY > 0) rotationAngle = Math.PI / 2; // Down
+            
+            // If standing still but a direction is queued, use the queued direction for rotation
+            else if (pacman.dirX === 0 && pacman.dirY === 0) {
+                 if (pacman.nextDirX > 0) rotationAngle = 0;
+                 else if (pacman.nextDirX < 0) rotationAngle = Math.PI;
+                 else if (pacman.nextDirY < 0) rotationAngle = -Math.PI / 2;
+                 else if (pacman.nextDirY > 0) rotationAngle = Math.PI / 2;
+            }
+            
+            // Apply rotation
+            ctx.rotate(rotationAngle);
+            
+            // Draw the image centered at (0, 0) in the translated and rotated context
+            const size = pacman.radius * 2;
+            
+            // Check if the image is loaded before drawing
+            if (pfpImage.complete) {
+                // Draw the PFP image instead of the yellow circle
+                ctx.drawImage(pfpImage, -size / 2, -size / 2, size, size);
+            } else {
+                // Fallback to the classic yellow circle if image hasn't loaded
+                ctx.fillStyle = pacman.color;
+                ctx.beginPath();
+                ctx.arc(0, 0, pacman.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.closePath();
+            }
+
+            // Restore the context to its original state
+            ctx.restore();
+        }
+
+        function drawHUD() {
+            document.getElementById('info-score').textContent = `SCORE: ${score}`;
+
+            let livesDisplay = '';
+            // Note: Lives display uses a generic icon, not the pfp image
+            for (let i = 0; i < lives; i++) {
+                livesDisplay += '🟡 '; 
+            }
+            document.getElementById('info-lives').textContent = `LIVES: ${lives}`;
+        }
+
+        // --- GAME LOGIC FUNCTIONS ---
+
+        function checkNextDirection() {
+            // Get the tile coordinates for the potential move in the NEXT direction
+            const nextTileX = Math.floor((pacman.x + pacman.nextDirX) / TILE_SIZE);
+            const nextTileY = Math.floor((pacman.y + pacman.nextDirY) / TILE_SIZE);
+
+            // Check if the target tile is a wall (type 1 or 3)
+            // Pac-Man is blocked by Wall (1) and Ghost Gate (3)
+            // ROBUST CHECK against map boundaries
+            const isTargetWall = (
+                nextTileY < 0 || nextTileY >= MAP_ROWS || nextTileX < 0 || nextTileX >= MAP_COLS || // Out of bounds
+                (map[nextTileY] && (map[nextTileY][nextTileX] === 1 || map[nextTileY][nextTileX] === 3))
+            );
+
+
+            if (isTargetWall) {
+                return; // Cannot turn if the new direction is blocked by a wall or gate
+            }
+            
+            // Tolerance: Allows turning slightly before or after reaching the exact center of the tile.
+            const centerTolerance = PAC_SPEED * 0.8; 
+            
+            let shouldTurn = false;
+
+            // Case 1: Switching from Horizontal (dirX != 0) to Vertical (nextDirY != 0)
+            if (pacman.dirX !== 0 && pacman.nextDirY !== 0) {
+                // To turn vertically, Pac-Man must be aligned vertically (Y-coordinate must be near the center of the tile)
+                const isAlignedVertically = Math.abs((pacman.y % TILE_SIZE) - TILE_SIZE / 2) < centerTolerance;
+                if (isAlignedVertically) {
+                    shouldTurn = true;
+                    // Snap X coordinate to center to ensure perfect alignment for the start of the vertical move
+                    pacman.x = Math.floor(pacman.x / TILE_SIZE) * TILE_SIZE + TILE_SIZE / 2;
+                }
+            } 
+            // Case 2: Switching from Vertical (dirY != 0) to Horizontal (nextDirX != 0)
+            else if (pacman.dirY !== 0 && pacman.nextDirX !== 0) {
+                // To turn horizontally, Pac-Man must be aligned horizontally (X-coordinate must be near the center of the tile)
+                const isAlignedHorizontally = Math.abs((pacman.x % TILE_SIZE) - TILE_SIZE / 2) < centerTolerance;
+                if (isAlignedHorizontally) {
+                    shouldTurn = true;
+                    // Snap Y coordinate to center to ensure perfect alignment for the start of the horizontal move
+                    pacman.y = Math.floor(pacman.y / TILE_SIZE) * TILE_SIZE + TILE_SIZE / 2;
+                }
+            }
+            // Case 3: Simple direction change on the same axis (e.g., Right to Left) or a move from stationary.
+            // This is always allowed if the target tile is clear.
+            else {
+                shouldTurn = true;
+            }
+
+            if (shouldTurn) {
+                // Apply the queued direction
+                pacman.dirX = pacman.nextDirX;
+                pacman.dirY = pacman.nextDirY;
+            }
+        }
+
+        function movePacman() {
+            const nextX = pacman.x + pacman.dirX;
+            const nextY = pacman.y + pacman.dirY;
+
+            const nextTileX = Math.floor(nextX / TILE_SIZE);
+            const nextTileY = Math.floor(nextY / TILE_SIZE);
+
+            // Wall collision check - Check if the next position is a Wall (1) or Ghost Gate (3) or OUT OF BOUNDS
+            const isTargetWall = (
+                nextTileY < 0 || nextTileY >= MAP_ROWS || nextTileX < 0 || nextTileX >= MAP_COLS || // Out of bounds
+                (map[nextTileY] && (map[nextTileY][nextTileX] === 1 || map[nextTileY][nextTileX] === 3))
+            );
+
+            if (isTargetWall) { 
+                // Don't update position if colliding with wall or gate (1 or 3)
+            } else {
+                pacman.x = nextX;
+                pacman.y = nextY;
+            }
+
+            // Tile collision (eating dots/pellets)
+            const currentTileX = Math.floor(pacman.x / TILE_SIZE);
+            const currentTileY = Math.floor(pacman.y / TILE_SIZE);
+            const tileType = map[currentTileY][currentTileX];
+
+            if (tileType === 0) { // Dot
+                map[currentTileY][currentTileX] = 2; // Empty
+                score += 10;
+            } else if (tileType === 4) { // Power Pellet
+                map[currentTileY][currentTileX] = 2; // Empty
+                score += 50;
+                startFrightMode();
+            }
+
+            // Check for level clear
+            if (countRemainingDots() === 0) {
+                levelComplete();
+            }
+        }
+
+        function startFrightMode() {
+            powerPelletTimer = POWER_PELLET_DURATION;
+            ghosts.forEach(g => {
+                if (!g.isDead) {
+                    g.isFrightened = true;
+                    // Reverse direction when turning frightened
+                    g.dirX = -g.dirX;
+                    g.dirY = -g.dirY;
+                }
+            });
+        }
+
+        function updateFrightMode(deltaTime) {
+            if (powerPelletTimer > 0) {
+                powerPelletTimer -= deltaTime;
+                if (powerPelletTimer <= 0) {
+                    powerPelletTimer = 0;
+                    ghosts.forEach(g => g.isFrightened = false);
+                }
+            }
+        }
+
+        function checkGhostCollision() {
+            for (const ghost of ghosts) {
+                const dist = Math.hypot(pacman.x - ghost.x, pacman.y - ghost.y);
+
+                if (dist < pacman.radius + ghost.radius) {
+                    if (ghost.isFrightened) {
+                        // Pac-Man eats ghost
+                        score += 200;
+                        ghost.isDead = true;
+                        ghost.isFrightened = false;
+                        showMessage('GHOST EATEN!', 1500);
+                    } else if (!ghost.isDead) {
+                        // Ghost eats Pac-Man
+                        resetPacman();
+                        lives--;
+                        if (lives <= 0) {
+                            gameOver();
+                        } else {
+                            showMessage('OUCH!', 1500);
+                        }
+                    }
+                }
+            }
+        }
+
+        function countRemainingDots() {
+            let dots = 0;
+            for (let y = 0; y < MAP_ROWS; y++) {
+                for (let x = 0; x < MAP_COLS; x++) {
+                    if (map[y][x] === 0 || map[y][x] === 4) {
+                        dots++;
+                    }
+                }
+            }
+            return dots;
+        }
+
+        function levelComplete() {
+            isPaused = true;
+            level++;
+            showMessage(`LEVEL ${level - 1} COMPLETE!`, 3000, () => {
+                 // Reset map and state for next level (simplified: just reset state)
+                 resetGame(true);
+                 showMessage('GET READY!', 1500, () => { isPaused = false; });
+            });
+        }
+
+        function gameOver() {
+            isPaused = true;
+            showMessage('GAME OVER', Infinity, () => {
+                // Press ENTER to restart
+                document.addEventListener('keydown', handleRestart);
+            });
+        }
+
+        function handleRestart(e) {
+            if (e.key === 'Enter') {
+                document.removeEventListener('keydown', handleRestart);
+                resetGame(false);
+                score = 0;
+                lives = 3;
+                level = 1;
+                isPaused = false;
+                hideMessage();
+            }
+        }
+
+
+        // --- RESET AND INITIALIZATION ---
+
+        function resetPacman() {
+            pacman.x = 1 * TILE_SIZE + TILE_SIZE / 2;
+            pacman.y = 1 * TILE_SIZE + TILE_SIZE / 2;
+            pacman.dirX = PAC_SPEED;
+            pacman.dirY = 0;
+            pacman.nextDirX = PAC_SPEED;
+            pacman.nextDirY = 0;
+            ghosts.forEach(g => {
+                g.x = g.startX;
+                g.y = g.startY;
+                g.isFrightened = false;
+                g.isDead = false;
+                g.dirX = 0;
+                g.dirY = -GHOST_BASE_SPEED; // Initial movement out of the house
+            });
+        }
+
+        function resetGame(keepDots) {
+            resetPacman();
+            powerPelletTimer = 0;
+
+            if (!keepDots) {
+                // Reset map to the initial state (with dot/pellet placement changes)
+                 map = initialMap.map(row => [...row]);
+            }
+        }
+
+        function showMessage(text, duration = Infinity, callback = () => {}) {
+            const messageBox = document.getElementById('message-box');
+            document.getElementById('message-text').textContent = text;
+            messageBox.style.display = 'block';
+
+            if (duration !== Infinity) {
+                setTimeout(() => {
+                    hideMessage();
+                    callback();
+                }, duration);
+            }
+        }
+
+        function hideMessage() {
+            document.getElementById('message-box').style.display = 'none';
+        }
+
+        // --- GAME LOOP ---
+
+        function gameLoop(timestamp) {
+            const deltaTime = timestamp - (lastUpdateTime || timestamp); // Calculate delta time
+
+            if (!isPaused) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                // 1. Update Game State
+                checkNextDirection();
+                movePacman();
+                // Timer update is now time-based (using deltaTime)
+                updateFrightMode(deltaTime); 
+                ghosts.forEach(g => g.update());
+                checkGhostCollision();
+
+                // 2. Drawing
+                drawMap();
+                drawPacman();
+                ghosts.forEach(g => g.draw());
+                drawHUD();
+            } else {
+                // Draw paused screen elements if needed
+                drawMap();
+                drawPacman();
+                ghosts.forEach(g => g.draw());
+                drawHUD();
+            }
+
+            // Update last time for the next frame's delta calculation
+            lastUpdateTime = timestamp;
+            gameLoopId = requestAnimationFrame(gameLoop);
+        }
+
+        // --- INPUT HANDLING ---
+
+        function handleKeydown(e) {
+            // Prevent scrolling on arrow key press
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                e.preventDefault(); 
+            }
+            
+            if (isPaused) {
+                if (e.key === 'Enter') {
+                    // Start the game from the initial 'Press ENTER to Start' screen
+                    if (document.getElementById('message-box').style.display === 'block' && document.getElementById('message-text').textContent.includes('ENTER')) {
+                        isPaused = false;
+                        hideMessage();
+                    }
+                }
+                return;
+            }
+
+            switch (e.key) {
+                case 'ArrowUp':
+                case 'w':
+                    pacman.nextDirX = 0;
+                    pacman.nextDirY = -PAC_SPEED;
+                    break;
+                case 'ArrowDown':
+                case 's':
+                    pacman.nextDirX = 0;
+                    pacman.nextDirY = PAC_SPEED;
+                    break;
+                case 'ArrowLeft':
+                case 'a':
+                    pacman.nextDirX = -PAC_SPEED;
+                    pacman.nextDirY = 0;
+                    break;
+                case 'ArrowRight':
+                case 'd':
+                    pacman.nextDirX = PAC_SPEED;
+                    pacman.nextDirY = 0;
+                    break;
+                case 'p':
+                case 'P':
+                    isPaused = !isPaused;
+                    if (isPaused) {
+                        showMessage('PAUSED', Infinity);
+                    } else {
+                        hideMessage();
+                    }
+                    break;
+            }
+        }
+
+        // --- INITIALIZATION ---
+        window.onload = function() {
+            document.addEventListener('keydown', handleKeydown);
+            showMessage('Press ENTER to Start', Infinity);
+            // Ensure image is loaded before starting the loop for the first draw
+            pfpImage.onload = () => {
+                 gameLoop(0); // Start the game loop
+            };
+            // Handle case where image loads instantly or is cached
+            if (pfpImage.complete) {
+                 gameLoop(0); 
+            }
+
+        };
+
+    </script>
+</body>
+</html>
